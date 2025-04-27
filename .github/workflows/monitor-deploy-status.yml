@@ -1,0 +1,52 @@
+name: Monitor Deploy FileHash API with ngrok Status
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+jobs:
+  check_status:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Query latest deploy workflow run status
+        id: get_status
+        env:
+          REPO: ${{ github.repository }}
+        run: |
+          echo "Querying latest deploy workflow run for file: deploy-file_hash_api-with_ngrok.yml ..."
+          RESPONSE=$(curl -s -H "Accept: application/vnd.github.v3+json" \
+            -H "Authorization: token ${{ secrets.GH_TOKEN }}" \
+            "https://api.github.com/repos/${REPO}/actions/workflows/deploy-file_hash_api-with_ngrok.yml/runs?per_page=1")
+          STATUS=$(echo "$RESPONSE" | jq -r '.workflow_runs[0].status')
+          CONCLUSION=$(echo "$RESPONSE" | jq -r '.workflow_runs[0].conclusion')
+          HTML_URL=$(echo "$RESPONSE" | jq -r '.workflow_runs[0].html_url')
+          if [ "$STATUS" = "null" ]; then
+            STATUS="N/A"
+          fi
+          if [ "$CONCLUSION" = "null" ]; then
+            CONCLUSION="N/A"
+          fi
+          echo "Latest run status: $STATUS"
+          echo "Latest run conclusion: $CONCLUSION"
+          echo "Latest run URL: $HTML_URL"
+          echo "STATUS=$STATUS" >> $GITHUB_ENV
+          echo "CONCLUSION=$CONCLUSION" >> $GITHUB_ENV
+          echo "HTML_URL=$HTML_URL" >> $GITHUB_ENV
+
+      - name: Send email alert with latest status
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.qq.com
+          server_port: 465
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: "Workflow Alert: Deploy Workflow Status - ${{ env.STATUS }} / ${{ env.CONCLUSION }}"
+          body: |
+            Repository: ${{ github.repository }}
+            Workflow: deploy-file_hash_api-with_ngrok.yml
+            Latest run status: ${{ env.STATUS }}
+            Latest run conclusion: ${{ env.CONCLUSION }}
+            Details: ${{ env.HTML_URL }}
+          to: "fox142857@foxmail.com"
+          from: "fox142857@foxmail.com"

@@ -1,0 +1,98 @@
+name: Expose API via ngrok with Auto-Restart
+
+on:
+  schedule:
+    - cron: '0 */5 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: "ngrok-tunnel"
+  cancel-in-progress: true
+
+jobs:
+  expose-api:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python environment
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install fastapi uvicorn python-multipart
+
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget tar jq
+
+      - name: Start API Server in background
+        run: |
+          nohup python main/file_hash_api_server.py &
+          sleep 5
+
+      - name: Download and extract ngrok
+        run: |
+          wget https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz -O ngrok.tgz
+          tar -xzf ngrok.tgz
+
+      - name: Authenticate ngrok
+        run: |
+          ./ngrok authtoken ${{ secrets.NGROK_AUTHTOKEN }}
+
+      - name: Start ngrok tunnel
+        run: |
+          nohup ./ngrok http 8000 --log=stdout --log-level debug > ngrok.log 2>&1 &
+          sleep 30
+
+      - name: Retrieve and display ngrok public URL
+        id: get_ngrok_url
+        run: |
+          echo "------- ngrok.log 内容 -------"
+          cat ngrok.log
+          echo "------------------------------"
+          NGROK_URL=$(curl --silent http://127.0.0.1:4040/api/tunnels | jq -r '.tunnels[0].public_url')
+          retries=0
+          while [ -z "$NGROK_URL" ] && [ $retries -lt 5 ]; do
+            echo "ngrok public URL not available yet, retrying in 10 seconds..."
+            sleep 10
+            NGROK_URL=$(curl --silent http://127.0.0.1:4040/api/tunnels | jq -r '.tunnels[0].public_url')
+            retries=$((retries+1))
+          done
+          echo "ngrok public URL: $NGROK_URL"
+          echo "NGROK_URL=$NGROK_URL" >> $GITHUB_ENV
+
+      # 新增步骤：更新配置文件
+      - name: Update url_config.json
+        run: |
+          echo '{"url": "${{ env.NGROK_URL }}"}' > url_config.json
+
+      - name: Push the updated url_config.json
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          git config --global user.name "fox142857"
+          git config --global user.email "fox142857@foxmail.com"
+          git remote set-url origin https://$GH_TOKEN@github.com/fox142857/CyberLandReform-test06.git
+          git add url_config.json
+          
+          # 检查是否有变更需要提交
+          if git diff-index --quiet HEAD --; then
+            echo "No changes to url_config.json"
+          else
+            git commit -m "Update ngrok URL in url_config.json"
+            git push origin master
+          fi
+
+      - name: Keep job alive until canceled
+        run: |
+          echo "API and ngrok tunnel are running. Access at ${{ env.NGROK_URL }}."
+          while true; do
+            echo "Waiting... (Press Ctrl+C to cancel if running locally)"
+            sleep 60
+          done
