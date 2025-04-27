@@ -78,7 +78,7 @@ jobs:
         run: |
           git config --global user.name "fox142857"
           git config --global user.email "fox142857@foxmail.com"
-          git remote set-url origin https://$GH_TOKEN@github.com/fox142857/CyberLandReform-test06.git
+          git remote set-url origin https://$GH_TOKEN@github.com/fox142857/CyberLandReform-test07.git
           git add url_config.json
           
           # 检查是否有变更需要提交
